@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flowers & Butterflies</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: pointer; user-select: none; }
+  #hint {
+    position: fixed; inset: 0; display: flex; flex-direction: column; gap: 10px;
+    align-items: center; justify-content: center;
+    color: #fff; font: 28px Georgia, "Times New Roman", serif; pointer-events: none;
+    transition: opacity 1s; text-align: center; padding: 0 16px;
+  }
+  #hint small { font-size: 18px; opacity: .75; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hint">Click To Add Flowers<small>Hold To Add Butterflies</small></div>
+<script>
+const cv = document.getElementById('canvas');
+const ctx = cv.getContext('2d');
+const hint = document.getElementById('hint');
+let W, H, dpr;
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = cv.clientWidth; H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+
+const palettes = [
+  { base: [255, 215, 225], main: [250, 110, 160], edge: [190, 40, 100], ctr: [255, 205, 60] },  // pink
+  { base: [235, 225, 255], main: [165, 105, 225], edge: [100, 50, 170], ctr: [255, 215, 70] },  // ungu
+  { base: [255, 235, 150], main: [255, 150, 45],  edge: [205, 85, 20],  ctr: [150, 70, 30] },   // oranye
+  { base: [255, 190, 190], main: [225, 55, 70],   edge: [140, 20, 45],  ctr: [255, 220, 80] },  // merah
+  { base: [255, 255, 255], main: [248, 242, 235], edge: [200, 185, 170], ctr: [255, 200, 40] }  // putih
+];
+const rgba = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const ease = t => 1 - Math.pow(1 - t, 3);
+const rand = (a, b) => a + Math.random() * (b - a);
+function angDiff(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+
+const flowers = [];
+
+function addFlower(x, y) {
+  const minY = H * 0.12, maxY = H * 0.75;
+  const top = y === undefined ? rand(minY, maxY) : clamp(y, minY, maxY);
+  flowers.push({
+    x, top,
+    bend: (Math.random() - 0.5) * 140,
+    size: 24 + Math.random() * 22,
+    pal: palettes[Math.floor(Math.random() * palettes.length)],
+    petals: 5 + Math.floor(Math.random() * 3),   // 5 - 7 kelopak
+    rot: Math.random() * Math.PI,
+    phase: Math.random() * 6.28,
+    speed: 0.6 + Math.random() * 0.6,
+    age: 0, bloom: 0, hx: x, hy: top
+  });
+}
+
+function stemPoint(f, t, sway) {
+  const x0 = f.x, y0 = H;
+  const x2 = f.x + sway, y2 = f.top;
+  const cx = f.x + f.bend, cy = (y0 + y2) / 2;
+  const u = 1 - t;
+  return [u * u * x0 + 2 * u * t * cx + t * t * x2,
+          u * u * y0 + 2 * u * t * cy + t * t * y2];
+}
+
+
+function petalPath(L, w) {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(-w * 1.1, -L * 0.25, -w * 0.9, -L * 0.95, 0, -L);
+  ctx.bezierCurveTo(w * 0.9, -L * 0.95, w * 1.1, -L * 0.25, 0, 0);
+  ctx.closePath();
+}
+
+function drawPetalLayer(count, L, w, offset, pal, shade) {
+  for (let i = 0; i < count; i++) {
+    ctx.save();
+    ctx.rotate(offset + (i / count) * Math.PI * 2);
+    const g = ctx.createLinearGradient(0, 0, 0, -L);
+    g.addColorStop(0, rgba(pal.base));
+    g.addColorStop(0.55, rgba(pal.main));
+    g.addColorStop(1, rgba(pal.edge));
+    petalPath(L, w);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = rgba(pal.edge, 0.55);
+    ctx.stroke();
+   
+    ctx.beginPath();
+    ctx.moveTo(0, -L * 0.12);
+    ctx.lineTo(0, -L * 0.8);
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = rgba(pal.edge, 0.3);
+    ctx.stroke();
+
+    if (shade > 0) {
+      petalPath(L, w);
+      ctx.fillStyle = `rgba(0,0,0,${shade})`;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawLeaf(x, y, angle, len) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  const g = ctx.createLinearGradient(0, 0, len, 0);
+  g.addColorStop(0, 'rgb(40,130,50)');
+  g.addColorStop(1, 'rgb(90,190,70)');
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(len * 0.5, -len * 0.38, len, 0);
+  ctx.quadraticCurveTo(len * 0.5, len * 0.38, 0, 0);
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0, 0); ctx.lineTo(len * 0.9, 0);
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(20,80,30,0.6)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFlower(f, time) {
+  const grow = ease(clamp(f.age / 1.6));
+  const bloom = ease(clamp((f.age - 1.0) / 1.6));
+  const sway = Math.sin(time * f.speed + f.phase) * 8 * grow;
+  f.bloom = bloom;
+
+
+  const steps = 40, n = Math.max(2, Math.floor(steps * grow));
+  for (let i = 0; i < n; i++) {
+    const t0 = i / steps, t1 = (i + 1) / steps;
+    const [ax, ay] = stemPoint(f, t0, sway * t0);
+    const [bx, by] = stemPoint(f, t1, sway * t1);
+    const k = i / steps;
+    ctx.strokeStyle = `rgb(${Math.round(35 + 45 * k)},${Math.round(125 + 35 * k)},${Math.round(45 + 10 * k)})`;
+    ctx.lineWidth = 3.4 - 1.4 * k;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+  }
+
+
+  const leaves = [[0.35, -1], [0.6, 1]];
+  for (const [t, dir] of leaves) {
+    if (grow > t + 0.05) {
+      const [lx, ly] = stemPoint(f, t, sway * t);
+      const lg = clamp((grow - t) / 0.3);
+      const ang = dir < 0 ? Math.PI + 0.5 : -0.5;
+      drawLeaf(lx, ly, ang, 26 * lg);
+    }
+  }
+
+  const [hx, hy] = stemPoint(f, Math.min(1, grow), sway * grow);
+  f.hx = hx; f.hy = hy;
+  if (bloom <= 0) return;
+
+
+  const R = f.size * bloom;
+  const pal = f.pal;
+  const wobble = f.rot + Math.sin(time * 0.5 + f.phase) * 0.05;
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(wobble);
+
+
+  drawPetalLayer(f.petals, R, R * 0.42, 0, pal, 0.12);
+  drawPetalLayer(f.petals, R * 0.72, R * 0.34, Math.PI / f.petals, pal, 0);
+
+
+  const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.2);
+  cg.addColorStop(0, rgba(pal.ctr));
+  cg.addColorStop(1, rgba([pal.ctr[0] * 0.7, pal.ctr[1] * 0.6, pal.ctr[2] * 0.4]));
+  ctx.beginPath(); ctx.arc(0, 0, R * 0.2, 0, Math.PI * 2);
+  ctx.fillStyle = cg; ctx.fill();
+
+
+  ctx.fillStyle = 'rgba(90,50,20,0.8)';
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.arc(Math.cos(a) * R * 0.12, Math.sin(a) * R * 0.12, Math.max(0.6, R * 0.025), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+
+const butterflies = [];
+const wingColors = [
+  { a: [80, 200, 255], b: [40, 90, 255] },
+  { a: [255, 200, 80], b: [255, 90, 40] },
+  { a: [255, 140, 220], b: [180, 60, 255] },
+  { a: [140, 255, 190], b: [30, 170, 120] }
+];
+
+function addButterfly(x, y) {
+  if (butterflies.length >= 30) butterflies.shift();
+  butterflies.push({
+    x, y,
+    heading: rand(-Math.PI, Math.PI),
+    speed: rand(60, 110),
+    phase: rand(0, 6.28),
+    seed: rand(0, 100),
+    wob: rand(0.8, 1.6),
+    size: rand(0.8, 1.3),
+    col: wingColors[Math.floor(Math.random() * wingColors.length)],
+    state: 'fly',
+    t: 0,
+    target: null,
+    flower: null,
+    landTime: 0
+  });
+}
+
+function pickFlower(b) {
+  const open = flowers.filter(f => f.bloom > 0.8);
+  if (open.length) b.target = open[Math.floor(Math.random() * open.length)];
+}
+
+function updateButterfly(b, dt, time) {
+  if (b.state === 'fly') {
+    b.t += dt;
+    b.phase += dt * 16;
+    if (b.target && !flowers.includes(b.target)) b.target = null;
+
+
+    b.heading += Math.sin(time * b.wob + b.seed) * dt * 2.2 + (Math.random() - 0.5) * dt * 3;
+
+
+    const m = 70;
+    if (b.x < m || b.x > W - m || b.y < m || b.y > H - m) {
+      const toCenter = Math.atan2(H / 2 - b.y, W / 2 - b.x);
+      b.heading += clamp(angDiff(b.heading, toCenter), -1, 1) * dt * 3;
+    }
+
+    let spd = b.speed;
+    if (b.target) {
+      const tx = b.target.hx, ty = b.target.hy;
+      const dx = tx - b.x, dy = ty - b.y;
+      const dist = Math.hypot(dx, dy);
+      b.heading += clamp(angDiff(b.heading, Math.atan2(dy, dx)), -1, 1) * dt * 5;
+      spd = Math.min(b.speed, 30 + dist * 1.2);
+      if (dist < 10) {
+        b.state = 'land';
+        b.flower = b.target;
+        b.landTime = rand(2.5, 6);
+      }
+    } else if (b.t > 3 && Math.random() < dt * 0.2) {
+      pickFlower(b);
+    }
+
+    b.x += Math.cos(b.heading) * spd * dt;
+    b.y += Math.sin(b.heading) * spd * dt + Math.sin(time * 6 + b.seed) * 12 * dt;
+  } else {
+
+    b.phase += dt * 3;
+    b.landTime -= dt;
+    if (!flowers.includes(b.flower)) b.landTime = 0;
+    else { b.x = b.flower.hx; b.y = b.flower.hy - 2; }
+    if (b.landTime <= 0) {
+      b.state = 'fly';
+      b.t = 0;
+      b.target = null;
+      b.flower = null;
+      b.heading = rand(-Math.PI, Math.PI);
+    }
+  }
+}
+
+function drawButterfly(b) {
+  const flap = 0.2 + 0.8 * Math.abs(Math.sin(b.phase));
+  const s = b.size;
+  const heading = b.state === 'land' ? -Math.PI / 2 : b.heading;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(heading + Math.PI / 2);
+  ctx.scale(s, s);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.shadowColor = rgba(b.col.a, 0.9);
+  ctx.shadowBlur = 14;
+
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.scale(side * flap, 1);
+
+    let g = ctx.createRadialGradient(8, -6, 0, 8, -6, 14);
+    g.addColorStop(0, rgba(b.col.a, 0.95));
+    g.addColorStop(1, rgba(b.col.b, 0.15));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(8, -6, 11, 8, -0.5, 0, Math.PI * 2); ctx.fill();
+
+    g = ctx.createRadialGradient(6, 6, 0, 6, 6, 10);
+    g.addColorStop(0, rgba(b.col.b, 0.9));
+    g.addColorStop(1, rgba(b.col.a, 0.1));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(6, 6, 8, 6, 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+
+  ctx.shadowBlur = 4;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(0, 9); ctx.stroke();
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -8); ctx.quadraticCurveTo(-3, -13, -5, -14);
+  ctx.moveTo(0, -8); ctx.quadraticCurveTo(3, -13, 5, -14);
+  ctx.stroke();
+  ctx.restore();
+}
+
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const time = now / 1000;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+  for (const f of flowers) { f.age += dt; drawFlower(f, time); }
+  for (const b of butterflies) { updateButterfly(b, dt, time); drawButterfly(b); }
+
+  requestAnimationFrame(loop);
+}
+
+
+for (let i = 0; i < 9; i++) {
+  setTimeout(() => addFlower(W * (0.08 + 0.84 * (i + Math.random() * 0.6) / 9)), i * 220);
+}
+
+setTimeout(() => { addButterfly(W * 0.3, H * 0.3); addButterfly(W * 0.7, H * 0.4); }, 3500);
+
+
+let downX = 0, downY = 0, holdTimer = null, holdInterval = null, didHold = false, pressing = false;
+
+function stopHold() {
+  clearTimeout(holdTimer);
+  clearInterval(holdInterval);
+  holdTimer = holdInterval = null;
+}
+
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect();
+  downX = e.clientX - r.left; downY = e.clientY - r.top;
+  pressing = true; didHold = false;
+  hint.style.opacity = 0;
+  holdTimer = setTimeout(() => {
+    didHold = true;
+    addButterfly(downX, downY);
+    holdInterval = setInterval(() => addButterfly(downX, downY), 800);
+  }, 350);
+});
+
+cv.addEventListener('pointermove', e => {
+  if (!pressing) return;
+  const r = cv.getBoundingClientRect();
+  downX = e.clientX - r.left; downY = e.clientY - r.top;
+});
+
+function release() {
+  if (!pressing) return;
+  pressing = false;
+  stopHold();
+  if (!didHold) {
+    addFlower(downX, downY);
+    if (flowers.length > 80) flowers.shift();
+  }
+}
+cv.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', () => { pressing = false; stopHold(); });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
